@@ -1114,6 +1114,335 @@ class VaultRepository(
         )
     }
 
+    fun getBundledSampleSizeBytes(): Long {
+        val fdLength = runCatching {
+            context.assets.openFd(BUNDLED_SAMPLE_ASSET_NAME).use { it.length }
+        }.getOrDefault(-1L)
+        if (fdLength > 0L) return fdLength
+
+        var total = 0L
+        val buf = ByteArray(64 * 1024)
+        context.assets.open(BUNDLED_SAMPLE_ASSET_NAME).use { stream ->
+            while (true) {
+                val read = stream.read(buf)
+                if (read <= 0) break
+                total += read
+            }
+        }
+        return total
+    }
+
+    suspend fun inspectBundledSample(existingDocs: List<VaultDocumentRecord>): PdfInspectionResult =
+        withContext(Dispatchers.IO) {
+            val sizeBytes = getBundledSampleSizeBytes()
+            val sha256 = context.assets.open(BUNDLED_SAMPLE_ASSET_NAME).use {
+                crypto.computeInputSha256(it)
+            }
+            val duplicate = existingDocs.firstOrNull {
+                it.descriptor.plaintextSha256.isNotBlank() &&
+                    it.descriptor.plaintextSha256.equals(sha256, ignoreCase = true)
+            }
+            PdfInspectionResult(
+                filename = BUNDLED_SAMPLE_ORIGINAL_FILENAME,
+                sizeBytes = sizeBytes,
+                sha256 = sha256,
+                duplicateTitle = duplicate?.descriptor?.title
+            )
+        }
+
+    suspend fun importBundledSamplePdf(
+        vaultId: String,
+        title: String,
+        description: String,
+        category: String,
+        tags: List<String>,
+        collection: String,
+        existingDocs: List<VaultDocumentRecord>,
+        onProgress: (Float) -> Unit = {}
+    ): Pair<VaultDocumentRecord, Boolean> = withContext(Dispatchers.IO) {
+        val masterKey = session.getMasterKeyCopy()
+            ?: throw VaultCryptoException.InvalidCredentials("Vault is locked")
+        var encryptedPair: EncryptedPdfPairResult? = null
+        try {
+            val sha256 = context.assets.open(BUNDLED_SAMPLE_ASSET_NAME).use {
+                crypto.computeInputSha256(it)
+            }
+            val existing = existingDocs.firstOrNull {
+                it.descriptor.plaintextSha256.isNotBlank() &&
+                    it.descriptor.plaintextSha256.equals(sha256, ignoreCase = true)
+            }
+            if (existing != null) {
+                return@withContext existing to true
+            }
+
+            val sizeBytes = getBundledSampleSizeBytes()
+            encryptedPair = crypto.encryptPdfFileChunked(
+                inputStreamProvider = { context.assets.open(BUNDLED_SAMPLE_ASSET_NAME) },
+                outputTempDir = tempWorkDir,
+                masterKey = masterKey,
+                vaultId = vaultId,
+                originalFilename = BUNDLED_SAMPLE_ORIGINAL_FILENAME,
+                title = title,
+                description = description,
+                category = category,
+                tags = tags,
+                collection = collection,
+                originalSizeBytes = sizeBytes,
+                onProgress = onProgress
+            )
+
+            val tempFile = File(encryptedPair.pvaultTempFilePath)
+            val persistentFile = File(offlineVaultDir, encryptedPair.pvaultFilename)
+            if (!tempFile.renameTo(persistentFile)) {
+                tempFile.copyTo(persistentFile, overwrite = true)
+                tempFile.delete()
+            }
+
+            val entity = CachedSidecarEntity(
+                assetId = encryptedPair.assetId,
+                vaultId = vaultId,
+                encryptedMetaJson = encryptedPair.pvmetaJson,
+                releaseId = 0L,
+                releaseTag = "local-sample",
+                pvaultAssetId = 0L,
+                pvmetaAssetId = 0L,
+                pvaultDownloadUrl = "",
+                pvmetaDownloadUrl = "",
+                pvaultSizeBytes = persistentFile.length(),
+                pvmetaSizeBytes = encryptedPair.pvmetaSizeBytes,
+                isOfflineCached = true,
+                localPvaultPath = persistentFile.absolutePath,
+                isLocalOnlyImport = true
+            )
+            dao.upsertSidecar(entity)
+
+            val record = VaultDocumentRecord(
+                assetId = encryptedPair.assetId,
+                descriptor = encryptedPair.descriptor,
+                releaseId = 0L,
+                releaseTag = "local-sample",
+                pvaultAssetId = 0L,
+                pvmetaAssetId = 0L,
+                pvaultDownloadUrl = "",
+                pvmetaDownloadUrl = "",
+                pvaultSizeBytes = persistentFile.length(),
+                pvmetaSizeBytes = encryptedPair.pvmetaSizeBytes,
+                isOfflineCached = true,
+                localPvaultPath = persistentFile.absolutePath,
+                isLocalOnlyImport = true
+            )
+            record to false
+        } catch (e: Exception) {
+            encryptedPair?.pvaultTempFilePath?.let { runCatching { File(it).delete() } }
+            throw e
+        } finally {
+            crypto.zeroBytes(masterKey)
+        }
+    }
+
+    suspend fun prepareBundledSamplePair(
+        vaultId: String,
+        title: String,
+        description: String,
+        category: String,
+        tags: List<String>,
+        collection: String,
+        onProgress: (Float) -> Unit = {}
+    ): EncryptedPdfPairResult = withContext(Dispatchers.IO) {
+        val masterKey = session.getMasterKeyCopy()
+            ?: throw VaultCryptoException.InvalidCredentials("Vault is locked")
+        try {
+            val sizeBytes = getBundledSampleSizeBytes()
+            crypto.encryptPdfFileChunked(
+                inputStreamProvider = { context.assets.open(BUNDLED_SAMPLE_ASSET_NAME) },
+                outputTempDir = tempWorkDir,
+                masterKey = masterKey,
+                vaultId = vaultId,
+                originalFilename = BUNDLED_SAMPLE_ORIGINAL_FILENAME,
+                title = title,
+                description = description,
+                category = category,
+                tags = tags,
+                collection = collection,
+                originalSizeBytes = sizeBytes,
+                onProgress = onProgress
+            )
+        } finally {
+            crypto.zeroBytes(masterKey)
+        }
+    }
+
+    suspend fun encryptAndUploadBundledSamplePdf(
+        owner: String,
+        repo: String,
+        vaultId: String,
+        title: String,
+        description: String,
+        category: String,
+        tags: List<String>,
+        collection: String,
+        onStageProgress: (String, Float) -> Unit
+    ): VaultDocumentRecord = withContext(Dispatchers.IO) {
+        val masterKey = session.getMasterKeyCopy()
+            ?: throw VaultCryptoException.InvalidCredentials("Vault is locked")
+        val token = session.getGitHubToken()
+            ?: throw GitHubApiException.Unauthorized("GitHub Fine-Grained PAT required for direct upload")
+
+        var encryptedPair: EncryptedPdfPairResult? = null
+        try {
+            onStageProgress("encrypting", 0f)
+            val sizeBytes = getBundledSampleSizeBytes()
+            encryptedPair = crypto.encryptPdfFileChunked(
+                inputStreamProvider = { context.assets.open(BUNDLED_SAMPLE_ASSET_NAME) },
+                outputTempDir = tempWorkDir,
+                masterKey = masterKey,
+                vaultId = vaultId,
+                originalFilename = BUNDLED_SAMPLE_ORIGINAL_FILENAME,
+                title = title,
+                description = description,
+                category = category,
+                tags = tags,
+                collection = collection,
+                originalSizeBytes = sizeBytes,
+                onProgress = { onStageProgress("encrypting", it) }
+            )
+
+            val pvaultFile = File(encryptedPair.pvaultTempFilePath)
+            val targetRelease = findOrCreateDataRelease(owner, repo, token)
+
+            onStageProgress("uploading_pvault", 0f)
+            val uploadedPvault = github.uploadReleaseAssetFile(
+                owner = owner,
+                repo = repo,
+                releaseId = targetRelease.id,
+                assetName = encryptedPair.pvaultFilename,
+                file = pvaultFile,
+                token = token,
+                onProgress = { onStageProgress("uploading_pvault", it) }
+            )
+
+            onStageProgress("uploading_pvmeta", 0.5f)
+            val uploadedPvmeta = try {
+                github.uploadReleaseAssetBytes(
+                    owner = owner,
+                    repo = repo,
+                    releaseId = targetRelease.id,
+                    assetName = encryptedPair.pvmetaFilename,
+                    bytes = encryptedPair.pvmetaJson.toByteArray(Charsets.UTF_8),
+                    token = token
+                )
+            } catch (e: Exception) {
+                runCatching { github.deleteReleaseAsset(owner, repo, uploadedPvault.id, token) }
+                throw e
+            }
+
+            val entity = CachedSidecarEntity(
+                assetId = encryptedPair.assetId,
+                vaultId = vaultId,
+                encryptedMetaJson = encryptedPair.pvmetaJson,
+                releaseId = targetRelease.id,
+                releaseTag = targetRelease.tagName,
+                pvaultAssetId = uploadedPvault.id,
+                pvmetaAssetId = uploadedPvmeta.id,
+                pvaultDownloadUrl = uploadedPvault.browserDownloadUrl,
+                pvmetaDownloadUrl = uploadedPvmeta.browserDownloadUrl,
+                pvaultSizeBytes = uploadedPvault.size,
+                pvmetaSizeBytes = uploadedPvmeta.size
+            )
+            dao.upsertSidecar(entity)
+
+            VaultDocumentRecord(
+                assetId = encryptedPair.assetId,
+                descriptor = encryptedPair.descriptor,
+                releaseId = targetRelease.id,
+                releaseTag = targetRelease.tagName,
+                pvaultAssetId = uploadedPvault.id,
+                pvmetaAssetId = uploadedPvmeta.id,
+                pvaultDownloadUrl = uploadedPvault.browserDownloadUrl,
+                pvmetaDownloadUrl = uploadedPvmeta.browserDownloadUrl,
+                pvaultSizeBytes = uploadedPvault.size,
+                pvmetaSizeBytes = uploadedPvmeta.size
+            )
+        } finally {
+            crypto.zeroBytes(masterKey)
+            encryptedPair?.pvaultTempFilePath?.let { runCatching { File(it).delete() } }
+        }
+    }
+
+    suspend fun uploadLocalDocumentToGitHub(
+        owner: String,
+        repo: String,
+        vaultId: String,
+        record: VaultDocumentRecord,
+        onStageProgress: (String, Float) -> Unit = { _, _ -> }
+    ): VaultDocumentRecord = withContext(Dispatchers.IO) {
+        val token = session.getGitHubToken()
+            ?: throw GitHubApiException.Unauthorized("GitHub Fine-Grained PAT required for direct upload")
+        val pvaultPath = record.localPvaultPath
+            ?: throw VaultCryptoException.InvalidPdf("Local encrypted .pvault file is missing")
+        val pvaultFile = File(pvaultPath)
+        if (!pvaultFile.exists()) {
+            throw VaultCryptoException.InvalidPdf("Local encrypted .pvault file does not exist")
+        }
+        val entity = dao.getSidecar(record.assetId)
+            ?: throw VaultCryptoException.CorruptedConfig("Local encrypted sidecar missing")
+
+        val targetRelease = findOrCreateDataRelease(owner, repo, token)
+        onStageProgress("uploading_pvault", 0f)
+        val uploadedPvault = github.uploadReleaseAssetFile(
+            owner = owner,
+            repo = repo,
+            releaseId = targetRelease.id,
+            assetName = record.descriptor.encryptedAssetFilename,
+            file = pvaultFile,
+            token = token,
+            onProgress = { onStageProgress("uploading_pvault", it) }
+        )
+
+        onStageProgress("uploading_pvmeta", 0.5f)
+        val uploadedPvmeta = try {
+            github.uploadReleaseAssetBytes(
+                owner = owner,
+                repo = repo,
+                releaseId = targetRelease.id,
+                assetName = record.descriptor.encryptedMetaFilename,
+                bytes = entity.encryptedMetaJson.toByteArray(Charsets.UTF_8),
+                token = token
+            )
+        } catch (e: Exception) {
+            runCatching { github.deleteReleaseAsset(owner, repo, uploadedPvault.id, token) }
+            throw e
+        }
+
+        val updatedEntity = entity.copy(
+            releaseId = targetRelease.id,
+            releaseTag = targetRelease.tagName,
+            pvaultAssetId = uploadedPvault.id,
+            pvmetaAssetId = uploadedPvmeta.id,
+            pvaultDownloadUrl = uploadedPvault.browserDownloadUrl,
+            pvmetaDownloadUrl = uploadedPvmeta.browserDownloadUrl,
+            pvaultSizeBytes = uploadedPvault.size,
+            pvmetaSizeBytes = uploadedPvmeta.size,
+            isOfflineCached = true,
+            localPvaultPath = pvaultFile.absolutePath,
+            isLocalOnlyImport = false,
+            updatedAtEpochMs = System.currentTimeMillis()
+        )
+        dao.upsertSidecar(updatedEntity)
+
+        record.copy(
+            releaseId = targetRelease.id,
+            releaseTag = targetRelease.tagName,
+            pvaultAssetId = uploadedPvault.id,
+            pvmetaAssetId = uploadedPvmeta.id,
+            pvaultDownloadUrl = uploadedPvault.browserDownloadUrl,
+            pvmetaDownloadUrl = uploadedPvmeta.browserDownloadUrl,
+            pvaultSizeBytes = uploadedPvault.size,
+            pvmetaSizeBytes = uploadedPvmeta.size,
+            isLocalOnlyImport = false
+        )
+    }
+
     private fun selectHighestConfigAsset(assets: List<GitHubAssetDto>): GitHubAssetDto? {
         val regex = Regex("vault-config-v(\\d+)\\.json", RegexOption.IGNORE_CASE)
         return assets.mapNotNull { asset ->
@@ -1129,6 +1458,11 @@ class VaultRepository(
     private fun extractLogicalId(filename: String, ext: String): String {
         val base = filename.removeSuffix(ext)
         return base.removePrefix("asset_").removePrefix("meta_")
+    }
+
+    companion object {
+        const val BUNDLED_SAMPLE_ASSET_NAME = "sample_chemistry_2nd_ch1.pdf"
+        const val BUNDLED_SAMPLE_ORIGINAL_FILENAME = "Chemistry_2nd_Chapter_1_Sample.pdf"
     }
 }
 

@@ -64,7 +64,8 @@ fun DashboardScreen(
     uiState: VaultUiState,
     onNavigate: (NavSection) -> Unit,
     onSyncNow: () -> Unit,
-    onOpenDocument: (VaultDocumentRecord) -> Unit
+    onOpenDocument: (VaultDocumentRecord) -> Unit,
+    onImportSamplePdf: () -> Unit
 ) {
     val s = uiState.strings
     val docs = uiState.documents
@@ -310,6 +311,16 @@ fun DashboardScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(Modifier.height(14.dp))
+                        FilledTonalButton(
+                            onClick = onImportSamplePdf,
+                            enabled = !uiState.isBusy,
+                            modifier = Modifier.testTag("dashboard_add_sample_pdf_button")
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(s.addSamplePdfAction)
+                        }
                     }
                 }
             }

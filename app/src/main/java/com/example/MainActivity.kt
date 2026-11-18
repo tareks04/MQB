@@ -363,7 +363,8 @@ private fun VaultSectionContent(
             uiState = uiState,
             onNavigate = viewModel::navigateTo,
             onSyncNow = { viewModel.syncWithGitHub(silent = false) },
-            onOpenDocument = viewModel::openDocumentInReader
+            onOpenDocument = viewModel::openDocumentInReader,
+            onImportSamplePdf = viewModel::importBundledSamplePdf
         )
 
         NavSection.LIBRARY, NavSection.FAVORITES, NavSection.RECENT -> LibraryScreen(
@@ -385,7 +386,9 @@ private fun VaultSectionContent(
                 viewModel.updateDocumentMetadata(doc, title, desc, cat, tags, col, doc.descriptor.isFavorite)
             },
             onDeleteDocument = viewModel::deleteDocument,
-            onShowMessage = viewModel::showMessage
+            onShowMessage = viewModel::showMessage,
+            onImportSamplePdf = viewModel::importBundledSamplePdf,
+            onUploadLocalToGitHub = viewModel::uploadLocalDocumentToGitHub
         )
 
         NavSection.UPLOAD, NavSection.PREPARE -> UploadAndPrepareScreen(
@@ -400,7 +403,10 @@ private fun VaultSectionContent(
             onSavePreparedTextToUri = viewModel::writeTextToUri,
             onOpenReleasesBrowser = viewModel::openGitHubReleasesInBrowser,
             onSyncWithGitHub = { viewModel.syncWithGitHub(silent = false) },
-            onImportPair = viewModel::importEncryptedPair
+            onImportPair = viewModel::importEncryptedPair,
+            onImportSampleToVault = viewModel::importBundledSamplePdf,
+            onEnqueueSamplePdf = viewModel::enqueueBundledSamplePdf,
+            onPrepareSamplePair = viewModel::prepareBundledSamplePair
         )
 
         NavSection.SYNC, NavSection.BACKUP, NavSection.SECURITY, NavSection.HELP -> VaultToolsScreen(

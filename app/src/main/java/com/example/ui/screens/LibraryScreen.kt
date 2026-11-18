@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -111,7 +112,9 @@ fun LibraryScreen(
         collection: String
     ) -> Unit,
     onDeleteDocument: (VaultDocumentRecord, Boolean) -> Unit,
-    onShowMessage: (String) -> Unit
+    onShowMessage: (String) -> Unit,
+    onImportSamplePdf: () -> Unit,
+    onUploadLocalToGitHub: (VaultDocumentRecord) -> Unit
 ) {
     val s = uiState.strings
     val context = LocalContext.current
@@ -317,6 +320,16 @@ fun LibraryScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (!favoritesOnly && !recentOnly && uiState.documents.isEmpty()) {
+                        Spacer(Modifier.height(14.dp))
+                        Button(
+                            onClick = onImportSamplePdf,
+                            enabled = !uiState.isBusy,
+                            modifier = Modifier.testTag("library_add_sample_pdf_button")
+                        ) {
+                            Text(s.addSamplePdfAction)
+                        }
+                    }
                 }
             }
         } else if (uiState.isGridView) {
@@ -417,7 +430,19 @@ fun LibraryScreen(
                     Text(s.printAction)
                 }
 
-                if (!doc.isLocalOnlyImport) {
+                if (doc.isLocalOnlyImport) {
+                    OutlinedButton(
+                        onClick = {
+                            selectedDocForSheet = null
+                            onUploadLocalToGitHub(doc)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(s.uploadToGitHubReleaseAction)
+                    }
+                } else {
                     OutlinedButton(
                         onClick = {
                             selectedDocForSheet = null

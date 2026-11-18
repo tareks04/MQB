@@ -165,6 +165,17 @@ data class AppStrings(
     val helpThreatModelBody: String,
     val helpTroubleshootingTitle: String,
     val helpTroubleshootingBody: String,
+    // Bundled Sample PDF
+    val addSamplePdfAction: String,
+    val samplePdfCardSubtitle: String,
+    val samplePdfTitle: String,
+    val samplePdfDescription: String,
+    val samplePdfCategory: String,
+    val samplePdfAlreadyExists: String,
+    val samplePdfAddedSuccess: String,
+    val uploadSampleToGitHubAction: String,
+    val prepareSamplePairAction: String,
+    val uploadToGitHubReleaseAction: String,
     // Categories
     val defaultCategories: List<String>
 )
@@ -325,6 +336,16 @@ val BnStrings = AppStrings(
     helpThreatModelBody = "পাবলিক গিটহাব রিলিজে ফাইলগুলো সবাই ডাউনলোড করতে পারে, তবে মাস্টার পাসওয়ার্ড বা রিকভারি কী ছাড়া AES-256-GCM এনক্রিপশন ভাঙা সম্ভব নয়। শক্তিশালী দীর্ঘ পাসফ্রেজ ব্যবহার করুন। ক্লায়েন্ট-সাইড অ্যাপ হ্যাক হওয়া ডিভাইস বা ব্রাউজার এক্সটেনশন থেকে পুরোপুরি আলাদা থাকতে পারে না।",
     helpTroubleshootingTitle = "৫. সমস্যা সমাধান",
     helpTroubleshootingBody = "৪০১/৪০৩ ত্রুটি হলে টোকেনের 'Contents: Read and write' অনুমতি যাচাই করুন। অসম্পূর্ণ পেয়ার দেখালে .pvault ও .pvmeta উভয়ই একই রিলিজে আছে কিনা দেখুন।",
+    addSamplePdfAction = "স্যাম্পল PDF যুক্ত করুন (রসায়ন ২য় · অধ্যায় ১)",
+    samplePdfCardSubtitle = "বান্ডেল করা রসায়ন ২য় পত্র (অধ্যায় ০১: পরিবেশ রসায়ন) স্যাম্পল বইটি আপনার ভল্ট কী দিয়ে এনক্রিপ্ট করে লাইব্রেরিতে যুক্ত করুন।",
+    samplePdfTitle = "রসায়ন ২য় পত্র — অধ্যায় ০১ (পরিবেশ রসায়ন)",
+    samplePdfDescription = "মেডিকেল মাস্টার প্রশ্নব্যাংক — রসায়ন ২য় পত্র, অধ্যায় ১ (স্যাম্পল ভল্ট ডকুমেন্ট)",
+    samplePdfCategory = "রসায়ন",
+    samplePdfAlreadyExists = "রসায়ন ২য় পত্র স্যাম্পল PDF ইতিমধ্যেই আপনার ভল্টে রয়েছে।",
+    samplePdfAddedSuccess = "রসায়ন ২য় পত্র (অধ্যায় ১) স্যাম্পল এনক্রিপ্ট হয়ে লাইব্রেরিতে যুক্ত হয়েছে!",
+    uploadSampleToGitHubAction = "স্যাম্পল PDF আপলোড কিউতে দিন",
+    prepareSamplePairAction = "স্যাম্পল PDF থেকে .pvault পেয়ার তৈরি",
+    uploadToGitHubReleaseAction = "গিটহাব রিলিজে আপলোড করুন",
     defaultCategories = listOf(
         "জীববিজ্ঞান", "পদার্থবিজ্ঞান", "রসায়ন", "ইংরেজি", "গণিত",
         "মেডিকেল ভর্তি", "বিশ্ববিদ্যালয় ভর্তি", "একাডেমিক বই", "নোটস", "প্রশ্নব্যাংক", "অন্যান্য"
@@ -487,6 +508,16 @@ val EnStrings = AppStrings(
     helpThreatModelBody = "Anyone can download public GitHub Release assets, but without your Master Password or Recovery Key they cannot decrypt AES-256-GCM contents. Client-side sessions cannot isolate secrets from a compromised device.",
     helpTroubleshootingTitle = "5. Troubleshooting",
     helpTroubleshootingBody = "For 401/403 errors, verify your Fine-Grained PAT has Contents Read/Write on the exact repository. For incomplete pairs, ensure both .pvault and .pvmeta are uploaded to the release.",
+    addSamplePdfAction = "Add Sample PDF (Chemistry 2nd · Ch. 1)",
+    samplePdfCardSubtitle = "Encrypt the bundled Chemistry 2nd Paper (Chapter 1: Environmental Chemistry) sample into your Vault for offline reading or GitHub upload.",
+    samplePdfTitle = "Chemistry 2nd Paper — Chapter 1 (Environmental Chemistry)",
+    samplePdfDescription = "Medical Master Question Bank — Chemistry 2nd Paper, Chapter 1 (Bundled Vault Sample)",
+    samplePdfCategory = "Chemistry",
+    samplePdfAlreadyExists = "The Chemistry 2nd Chapter 1 sample PDF is already in your library.",
+    samplePdfAddedSuccess = "Chemistry 2nd (Chapter 1) sample encrypted and added to your library!",
+    uploadSampleToGitHubAction = "Queue Sample PDF for Upload",
+    prepareSamplePairAction = "Prepare .pvault Pair from Sample",
+    uploadToGitHubReleaseAction = "Upload to GitHub Release",
     defaultCategories = listOf(
         "Biology", "Physics", "Chemistry", "English", "Mathematics",
         "Medical Admission", "University Admission", "Academic Books", "Notes", "Question Banks", "Other"

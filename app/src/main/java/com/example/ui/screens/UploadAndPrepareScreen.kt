@@ -87,7 +87,22 @@ fun UploadAndPrepareScreen(
     onSavePreparedTextToUri: (Uri, String, String) -> Unit,
     onOpenReleasesBrowser: () -> Unit,
     onSyncWithGitHub: () -> Unit,
-    onImportPair: (pvaultUri: Uri, pvmetaUri: Uri) -> Unit
+    onImportPair: (pvaultUri: Uri, pvmetaUri: Uri) -> Unit,
+    onImportSampleToVault: () -> Unit,
+    onEnqueueSamplePdf: (
+        title: String,
+        desc: String,
+        cat: String,
+        tagsCsv: String,
+        collection: String
+    ) -> Unit,
+    onPrepareSamplePair: (
+        title: String,
+        desc: String,
+        cat: String,
+        tagsCsv: String,
+        collection: String
+    ) -> Unit
 ) {
     val s = uiState.strings
     var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
@@ -276,6 +291,32 @@ fun UploadAndPrepareScreen(
                                     Text(s.encryptAndUploadButton, maxLines = 1)
                                 }
                             }
+
+                            FilledTonalButton(
+                                onClick = onImportSampleToVault,
+                                enabled = !uiState.isBusy,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("upload_tab_add_sample_to_vault_button")
+                            ) {
+                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(s.addSamplePdfAction)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    onEnqueueSamplePdf(title, description, category, tagsCsv, collection)
+                                },
+                                enabled = !uiState.isBusy,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("upload_sample_pdf_button")
+                            ) {
+                                Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(s.uploadSampleToGitHubAction)
+                            }
                         }
                     }
                 }
@@ -379,6 +420,20 @@ fun UploadAndPrepareScreen(
                                 Icon(Icons.Default.Lock, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
                                 Text(s.encryptAndPrepareButton)
+                            }
+
+                            FilledTonalButton(
+                                onClick = {
+                                    onPrepareSamplePair(title, description, category, tagsCsv, collection)
+                                },
+                                enabled = !uiState.isBusy,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("prepare_sample_pdf_button")
+                            ) {
+                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(s.prepareSamplePairAction)
                             }
 
                             uiState.preparedPair?.let { pair ->

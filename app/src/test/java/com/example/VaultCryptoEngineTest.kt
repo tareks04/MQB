@@ -1,13 +1,17 @@
 package com.example
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import com.example.crypto.KdfAlgorithm
 import com.example.crypto.VaultCryptoEngine
 import com.example.crypto.VaultCryptoException
+import com.example.data.VaultRepository
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -148,6 +152,54 @@ class VaultCryptoEngineTest {
                     originalSizeBytes = fakeBytes.size.toLong()
                 )
             }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun bundledSamplePdfAssetIsValidAndEncryptable() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val header = context.assets.open(VaultRepository.BUNDLED_SAMPLE_ASSET_NAME).use { stream ->
+            ByteArray(5).also { buf ->
+                val read = stream.read(buf)
+                assertEquals(5, read)
+            }
+        }
+        assertArrayEquals("%PDF-".toByteArray(Charsets.US_ASCII), header)
+
+        val tempDir = createTempDirectory("pvault_sample_test").toFile()
+        try {
+            val sampleSize = context.assets.openFd(VaultRepository.BUNDLED_SAMPLE_ASSET_NAME).use { it.length }
+            assertTrue(sampleSize > 1_000_000L)
+
+            val bundle = engine.createNewVault(
+                password = "SampleVaultPassword#2026".toCharArray(),
+                kdfAlgorithm = KdfAlgorithm.PBKDF2_SHA256,
+                iterations = 100_000
+            )
+            val pair = engine.encryptPdfFileChunked(
+                inputStreamProvider = { context.assets.open(VaultRepository.BUNDLED_SAMPLE_ASSET_NAME) },
+                outputTempDir = tempDir,
+                masterKey = bundle.masterKey,
+                vaultId = bundle.config.vaultId,
+                originalFilename = VaultRepository.BUNDLED_SAMPLE_ORIGINAL_FILENAME,
+                title = "Chemistry 2nd Paper - Chapter 1",
+                description = "Sample",
+                category = "Chemistry",
+                tags = listOf("Chemistry", "Chapter 1"),
+                collection = "Chemistry 2nd Paper",
+                originalSizeBytes = sampleSize
+            )
+
+            assertEquals(sampleSize, pair.descriptor.originalSizeBytes)
+            assertTrue(pair.descriptor.chunkCount >= 2)
+            val pvaultFile = File(pair.pvaultTempFilePath)
+            assertTrue(pvaultFile.exists())
+
+            val decryptedOut = File(tempDir, "sample_decrypted.pdf")
+            engine.decryptPdfFileChunked(pvaultFile, decryptedOut, pair.descriptor, bundle.masterKey)
+            assertEquals(sampleSize, decryptedOut.length())
         } finally {
             tempDir.deleteRecursively()
         }

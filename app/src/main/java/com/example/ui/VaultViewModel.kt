@@ -77,6 +77,7 @@ data class UploadQueueItem(
     val collection: String,
     val sha256: String,
     val duplicateTitle: String? = null,
+    val isBundledSample: Boolean = false,
     val status: UploadJobStatus = UploadJobStatus.QUEUED,
     val progress: Float = 0f,
     val errorMessage: String? = null
@@ -348,6 +349,18 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 crypto.zeroBytes(bundle.masterKey)
+                val initialDocs = runCatching {
+                    val (sampleRecord, _) = repository.importBundledSamplePdf(
+                        vaultId = bundle.config.vaultId,
+                        title = s.samplePdfTitle,
+                        description = s.samplePdfDescription,
+                        category = s.samplePdfCategory,
+                        tags = listOf("Chemistry", "Chapter 1", "Sample"),
+                        collection = if (_uiState.value.isBangla) "রসায়ন ২য় পত্র" else "Chemistry 2nd Paper",
+                        existingDocs = emptyList()
+                    )
+                    listOf(sampleRecord)
+                }.getOrDefault(emptyList())
                 _uiState.update {
                     it.copy(
                         isBusy = false,
@@ -355,7 +368,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                         activeVaultConfig = bundle.config,
                         oneTimeRecoveryKey = bundle.recoveryKeyFormatted,
                         pendingExportConfigJson = bundle.configJson,
-                        documents = emptyList(),
+                        documents = initialDocs,
                         snackbarMessage = if (publishToGitHub && patTrimmed.isNotEmpty()) {
                             if (it.isBangla) "ভল্ট তৈরি ও গিটহাব vault-control-এ প্রকাশিত হয়েছে।"
                             else "Vault created and published to GitHub vault-control."
@@ -618,25 +631,41 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 try {
-                    val record = repository.encryptAndUploadPdf(
-                        uri = item.uri,
-                        owner = settings.githubOwner,
-                        repo = settings.githubRepo,
-                        vaultId = vaultId,
-                        originalFilename = item.originalFilename,
-                        originalSizeBytes = item.originalSizeBytes,
-                        title = item.title,
-                        description = item.description,
-                        category = item.category,
-                        tags = item.tags,
-                        collection = item.collection
-                    ) { stage, progress ->
+                    val stageCallback: (String, Float) -> Unit = { stage, progress ->
                         val st = when (stage) {
                             "encrypting" -> UploadJobStatus.ENCRYPTING
                             "uploading_pvault" -> UploadJobStatus.UPLOADING_PVAULT
                             else -> UploadJobStatus.UPLOADING_PVMETA
                         }
                         updateQueueItem(item.id) { it.copy(status = st, progress = progress, errorMessage = null) }
+                    }
+                    val record = if (item.isBundledSample) {
+                        repository.encryptAndUploadBundledSamplePdf(
+                            owner = settings.githubOwner,
+                            repo = settings.githubRepo,
+                            vaultId = vaultId,
+                            title = item.title,
+                            description = item.description,
+                            category = item.category,
+                            tags = item.tags,
+                            collection = item.collection,
+                            onStageProgress = stageCallback
+                        )
+                    } else {
+                        repository.encryptAndUploadPdf(
+                            uri = item.uri,
+                            owner = settings.githubOwner,
+                            repo = settings.githubRepo,
+                            vaultId = vaultId,
+                            originalFilename = item.originalFilename,
+                            originalSizeBytes = item.originalSizeBytes,
+                            title = item.title,
+                            description = item.description,
+                            category = item.category,
+                            tags = item.tags,
+                            collection = item.collection,
+                            onStageProgress = stageCallback
+                        )
                     }
                     updateQueueItem(item.id) { it.copy(status = UploadJobStatus.COMPLETED, progress = 1f) }
                     _uiState.update { state ->
@@ -646,6 +675,176 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                     updateQueueItem(item.id) {
                         it.copy(status = UploadJobStatus.FAILED, errorMessage = mapFriendlyError(e))
                     }
+                }
+            }
+        }
+    }
+
+    fun importBundledSamplePdf() {
+        val vaultId = _uiState.value.activeVaultConfig?.vaultId ?: return
+        val s = _uiState.value.strings
+        val isBangla = _uiState.value.isBangla
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isBusy = true,
+                    busyMessage = if (isBangla) "স্যাম্পল পিডিএফ এনক্রিপ্ট হচ্ছে..." else "Encrypting bundled sample PDF..."
+                )
+            }
+            try {
+                val (record, alreadyExists) = repository.importBundledSamplePdf(
+                    vaultId = vaultId,
+                    title = s.samplePdfTitle,
+                    description = s.samplePdfDescription,
+                    category = s.samplePdfCategory,
+                    tags = listOf("Chemistry", "Chapter 1", "Sample"),
+                    collection = if (isBangla) "রসায়ন ২য় পত্র" else "Chemistry 2nd Paper",
+                    existingDocs = _uiState.value.documents
+                )
+                _uiState.update { state ->
+                    state.copy(
+                        isBusy = false,
+                        busyMessage = null,
+                        documents = if (alreadyExists) state.documents
+                        else listOf(record) + state.documents.filter { it.assetId != record.assetId },
+                        snackbarMessage = if (alreadyExists) s.samplePdfAlreadyExists else s.samplePdfAddedSuccess
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isBusy = false, busyMessage = null, snackbarMessage = mapFriendlyError(e))
+                }
+            }
+        }
+    }
+
+    fun enqueueBundledSamplePdf(
+        customTitle: String,
+        description: String,
+        category: String,
+        tagsCsv: String,
+        collection: String
+    ) {
+        val s = _uiState.value.strings
+        val docs = _uiState.value.documents
+        val parsedTags = tagsCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            .ifEmpty { listOf("Chemistry", "Chapter 1", "Sample") }
+        viewModelScope.launch {
+            try {
+                val info = repository.inspectBundledSample(docs)
+                val effectiveTitle = customTitle.trim().ifBlank { s.samplePdfTitle }
+                val effectiveDesc = description.trim().ifBlank { s.samplePdfDescription }
+                val effectiveCat = category.ifBlank { s.samplePdfCategory }
+                val effectiveCol = collection.trim().ifBlank {
+                    if (_uiState.value.isBangla) "রসায়ন ২য় পত্র" else "Chemistry 2nd Paper"
+                }
+                val item = UploadQueueItem(
+                    uri = Uri.EMPTY,
+                    originalFilename = info.filename,
+                    originalSizeBytes = info.sizeBytes,
+                    title = effectiveTitle,
+                    description = effectiveDesc,
+                    category = effectiveCat,
+                    tags = parsedTags,
+                    collection = effectiveCol,
+                    sha256 = info.sha256,
+                    duplicateTitle = info.duplicateTitle,
+                    isBundledSample = true
+                )
+                _uiState.update { it.copy(uploadQueue = it.uploadQueue + item) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(snackbarMessage = mapFriendlyError(e)) }
+            }
+        }
+    }
+
+    fun prepareBundledSamplePair(
+        title: String,
+        description: String,
+        category: String,
+        tagsCsv: String,
+        collection: String
+    ) {
+        val vaultId = _uiState.value.activeVaultConfig?.vaultId ?: return
+        val s = _uiState.value.strings
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isBusy = true,
+                    busyMessage = if (it.isBangla) "স্যাম্পল পিডিএফ এনক্রিপ্ট হচ্ছে..." else "Encrypting sample PDF locally..."
+                )
+            }
+            try {
+                val tags = tagsCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                    .ifEmpty { listOf("Chemistry", "Chapter 1", "Sample") }
+                val pair = repository.prepareBundledSamplePair(
+                    vaultId = vaultId,
+                    title = title.ifBlank { s.samplePdfTitle },
+                    description = description.ifBlank { s.samplePdfDescription },
+                    category = category.ifBlank { s.samplePdfCategory },
+                    tags = tags,
+                    collection = collection.ifBlank {
+                        if (_uiState.value.isBangla) "রসায়ন ২য় পত্র" else "Chemistry 2nd Paper"
+                    }
+                )
+                _uiState.update {
+                    it.copy(
+                        isBusy = false,
+                        busyMessage = null,
+                        preparedPair = pair,
+                        snackbarMessage = if (it.isBangla) {
+                            "স্যাম্পল এনক্রিপ্টেড পেয়ার প্রস্তুত! এখন দুটি ফাইল সেভ করে গিটহাবে আপলোড করুন।"
+                        } else {
+                            "Sample encrypted pair ready! Save both files and upload to GitHub Release."
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isBusy = false, busyMessage = null, snackbarMessage = mapFriendlyError(e))
+                }
+            }
+        }
+    }
+
+    fun uploadLocalDocumentToGitHub(record: VaultDocumentRecord) {
+        val settings = _uiState.value.settings
+        val vaultId = _uiState.value.activeVaultConfig?.vaultId ?: return
+        if (settings.githubOwner.isBlank() || settings.githubRepo.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    snackbarMessage = if (it.isBangla) "প্রথমে গিটহাব রিপোজিটরি কনফিগার করুন।"
+                    else "Please configure your GitHub repository first."
+                )
+            }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isBusy = true,
+                    busyMessage = if (it.isBangla) "গিটহাব রিলিজে আপলোড হচ্ছে..." else "Uploading encrypted files to GitHub Release..."
+                )
+            }
+            try {
+                val updated = repository.uploadLocalDocumentToGitHub(
+                    owner = settings.githubOwner,
+                    repo = settings.githubRepo,
+                    vaultId = vaultId,
+                    record = record
+                )
+                _uiState.update { state ->
+                    state.copy(
+                        isBusy = false,
+                        busyMessage = null,
+                        documents = state.documents.map { if (it.assetId == updated.assetId) updated else it },
+                        snackbarMessage = if (state.isBangla) "গিটহাব রিলিজে আপলোড সম্পন্ন হয়েছে।"
+                        else "Uploaded encrypted pair to GitHub Release."
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isBusy = false, busyMessage = null, snackbarMessage = mapFriendlyError(e))
                 }
             }
         }
